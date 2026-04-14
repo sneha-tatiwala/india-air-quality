@@ -1,4 +1,4 @@
-const API = "http://localhost:8000/api";
+const API = "https://india-air-quality.onrender.com/api";
 
 // ── AQI helpers ────────────────────────────────────────────────────
 const AQI_BANDS = [

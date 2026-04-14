@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const API_CHAT = 'http://localhost:8000/api/chat';
+  const API_CHAT = 'https://india-air-quality.onrender.com/api/chat';
 
   // ── State ──────────────────────────────────────────────────────────
   let isOpen    = false;

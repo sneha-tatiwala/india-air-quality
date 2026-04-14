@@ -375,6 +375,7 @@ async function openStation(stationId) {
   document.getElementById("chart-empty").classList.add("hidden");
   document.getElementById("chart-loading").classList.remove("hidden");
   document.getElementById("right-panel").classList.remove("hidden");
+  showBackdrop();
 
   // Scroll map into view if we're in analytics section
   document.querySelector(".map-section").scrollIntoView({ behavior: "smooth" });
@@ -516,15 +517,35 @@ document.getElementById("trend-days").addEventListener("change", async function 
   if (activeStationId) await renderTrend(activeStationId);
 });
 
+// ── Panel helpers (backdrop on mobile) ────────────────────────────────
+const backdrop = document.getElementById("panel-backdrop");
+
+function isMobile() { return window.innerWidth <= 768; }
+
+function showBackdrop() { if (isMobile()) backdrop.style.display = "block"; }
+function hideBackdrop() { backdrop.style.display = "none"; }
+
+backdrop.addEventListener("click", () => {
+  document.getElementById("left-panel").classList.add("hidden");
+  document.getElementById("right-panel").classList.add("hidden");
+  hideBackdrop();
+  activeStationId = null;
+  Object.values(markerMap).forEach(m => m.setStyle({ weight: 1 }));
+});
+
 // ── Panel toggles ─────────────────────────────────────────────────────
 document.getElementById("toggle-panel-btn").addEventListener("click", () => {
-  document.getElementById("left-panel").classList.toggle("hidden");
+  const panel = document.getElementById("left-panel");
+  const isHidden = panel.classList.toggle("hidden");
+  isHidden ? hideBackdrop() : showBackdrop();
 });
 document.getElementById("close-left-panel").addEventListener("click", () => {
   document.getElementById("left-panel").classList.add("hidden");
+  hideBackdrop();
 });
 document.getElementById("close-right-panel").addEventListener("click", () => {
   document.getElementById("right-panel").classList.add("hidden");
+  hideBackdrop();
   activeStationId = null;
   Object.values(markerMap).forEach(m => m.setStyle({ weight: 1 }));
 });

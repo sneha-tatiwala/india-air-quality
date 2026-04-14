@@ -581,3 +581,189 @@ body {
 }
 .cw__send:hover   { opacity: 0.85; }
 .cw__send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   MOBILE & TABLET RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Tablet (≤1024px) ───────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  :root { --panel-w: 290px; }
+
+  .analytics { padding: 36px 24px 48px; }
+  .stat-cards { grid-template-columns: repeat(2, 1fr); }
+  .data-note-inner { grid-template-columns: 1fr 1fr; gap: 20px; }
+  .analytics-chart-wrap.tall { height: 280px; }
+}
+
+/* ── Mobile (≤768px) ────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  :root { --nav-h: auto; }
+
+  /* ── Navbar ────────────────────────────────────────────────────── */
+  .navbar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 2000;
+  }
+
+  .nav-brand {
+    flex: 1;
+    font-size: 14px;
+  }
+
+  .nav-source { display: none; }
+
+  .nav-controls {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+  }
+
+  .search-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .pollutant-select { min-width: 80px; }
+
+  .btn-secondary {
+    padding: 7px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* ── Map section ───────────────────────────────────────────────── */
+  .map-section {
+    height: 52vh;
+    min-height: 300px;
+  }
+
+  /* ── Panels → bottom sheets ────────────────────────────────────── */
+  .left-panel,
+  .right-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100% !important;
+    max-height: 62vh;
+    border-radius: 18px 18px 0 0;
+    border: none;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+    z-index: 1500;
+    overflow-y: auto;
+  }
+
+  /* Drag handle at top of each sheet */
+  .left-panel::before,
+  .right-panel::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 10px auto 0;
+    flex-shrink: 0;
+  }
+
+  /* Backdrop behind open panels */
+  .panel-backdrop {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 1400;
+  }
+
+  /* ── Legend ─────────────────────────────────────────────────────── */
+  .legend {
+    bottom: 10px;
+    padding: 6px 10px;
+    gap: 8px;
+    max-width: calc(100vw - 80px);
+  }
+
+  .legend-title { display: none; }
+
+  .legend-items {
+    gap: 6px;
+    font-size: 10px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  /* ── Analytics ──────────────────────────────────────────────────── */
+  .analytics {
+    padding: 28px 16px 48px;
+  }
+
+  .analytics-title { font-size: 18px; }
+
+  .stat-cards {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .stat-card { padding: 16px 14px; }
+  .stat-value { font-size: 24px; }
+  .stat-label { font-size: 12px; }
+
+  .analytics-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .analytics-card { padding: 16px; gap: 12px; }
+  .analytics-card.full-width { grid-column: 1; }
+
+  .analytics-chart-wrap      { height: 220px; }
+  .analytics-chart-wrap.tall { height: 260px; }
+  .analytics-chart-wrap.compare-chart-wrap { height: 220px; }
+
+  .compare-controls { flex-direction: column; align-items: stretch; }
+  .compare-selects  { flex-direction: column; }
+  .compare-select   { min-width: unset; width: 100%; }
+  .btn-primary      { width: 100%; text-align: center; }
+
+  .data-note { padding: 18px; }
+  .data-note-inner {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  /* ── Right panel readings grid (2→1 col) ────────────────────────── */
+  .readings-grid { grid-template-columns: 1fr 1fr; }
+  .chart-wrap    { height: 140px; }
+
+  /* ── Chat widget ─────────────────────────────────────────────────── */
+  #cw {
+    bottom: 16px;
+    right: 16px;
+  }
+
+  .cw__panel {
+    width: calc(100vw - 32px);
+    max-height: 70vh;
+  }
+
+  .cw__bubble {
+    padding: 11px 16px 11px 14px;
+  }
+}
+
+/* ── Small phones (≤390px) ──────────────────────────────────────── */
+@media (max-width: 390px) {
+  .stat-cards { grid-template-columns: 1fr 1fr; }
+  .stat-value  { font-size: 20px; }
+  .nav-controls { grid-template-columns: 1fr auto; }
+  .btn-secondary { display: none; } /* hide "Top Polluted" btn — use map tap instead */
+}

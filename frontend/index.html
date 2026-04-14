@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>India Air Quality Explorer</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── NAV ────────────────────────────────────────────────────── -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="nav-dot"></span>
+      India Air Quality Explorer
+    </div>
+    <div class="nav-controls">
+      <input id="search-input" class="search-input" type="text" placeholder="Search city or station…" autocomplete="off" />
+      <select id="pollutant-select" class="pollutant-select">
+        <option value="pm25">PM2.5</option>
+        <option value="pm10">PM10</option>
+        <option value="no2">NO₂</option>
+        <option value="so2">SO₂</option>
+        <option value="co">CO</option>
+        <option value="o3">O₃</option>
+      </select>
+      <button id="toggle-panel-btn" class="btn-secondary">Top Polluted</button>
+    </div>
+    <div class="nav-source">
+      Source: CPCB via OpenAQ &nbsp;|&nbsp; Live data
+      <span id="last-updated" class="last-updated"></span>
+    </div>
+  </nav>
+
+  <!-- ── MAP SECTION ────────────────────────────────────────────── -->
+  <section class="map-section">
+    <div class="layout">
+
+      <!-- Left panel -->
+      <aside id="left-panel" class="left-panel hidden">
+        <div class="panel-header">
+          <h3 id="left-panel-title">Top Polluted Stations</h3>
+          <button class="close-btn" id="close-left-panel">✕</button>
+        </div>
+        <div id="top-polluted-list" class="top-polluted-list">
+          <div class="loading-msg">Loading…</div>
+        </div>
+      </aside>
+
+      <!-- Map -->
+      <div id="map"></div>
+
+      <!-- Right panel -->
+      <aside id="right-panel" class="right-panel hidden">
+        <div class="panel-header">
+          <div>
+            <div id="panel-station-name" class="panel-station-name">—</div>
+            <div id="panel-city" class="panel-city">—</div>
+          </div>
+          <button class="close-btn" id="close-right-panel">✕</button>
+        </div>
+
+        <div id="aqi-badge-wrap" class="aqi-badge-wrap">
+          <div id="aqi-badge" class="aqi-badge">—</div>
+          <div id="aqi-label" class="aqi-label">—</div>
+        </div>
+
+        <div id="readings-grid" class="readings-grid"></div>
+
+        <div class="chart-section">
+          <div class="chart-header">
+            <span id="chart-title" class="chart-title">PM2.5 — 30-day trend</span>
+            <select id="trend-days" class="trend-days-select">
+              <option value="14">14 days</option>
+              <option value="30" selected>30 days</option>
+              <option value="90">90 days</option>
+            </select>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="trend-chart"></canvas>
+            <div id="chart-loading" class="chart-loading hidden">Loading chart…</div>
+            <div id="chart-empty" class="chart-empty hidden">No trend data for this station.</div>
+          </div>
+        </div>
+
+        <div class="reference-box">
+          <div class="ref-title">NAAQS 24-hr Limits</div>
+          <div class="ref-row"><span>PM2.5</span><span>60 µg/m³</span></div>
+          <div class="ref-row"><span>PM10</span><span>100 µg/m³</span></div>
+          <div class="ref-row"><span>NO₂</span><span>80 µg/m³</span></div>
+          <div class="ref-row"><span>SO₂</span><span>80 µg/m³</span></div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+      <span class="legend-title">AQI (PM2.5 µg/m³)</span>
+      <div class="legend-items">
+        <span class="legend-dot" style="background:#00c853"></span><span>Good (0–30)</span>
+        <span class="legend-dot" style="background:#aeea00"></span><span>Satisfactory (31–60)</span>
+        <span class="legend-dot" style="background:#ffd600"></span><span>Moderate (61–90)</span>
+        <span class="legend-dot" style="background:#ff6d00"></span><span>Poor (91–120)</span>
+        <span class="legend-dot" style="background:#dd2c00"></span><span>Very Poor (121–250)</span>
+        <span class="legend-dot" style="background:#aa00ff"></span><span>Severe (250+)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── ANALYTICS SECTION ──────────────────────────────────────── -->
+  <section class="analytics">
+
+    <!-- Snapshot cards -->
+    <div class="analytics-header">
+      <h2 class="analytics-title">National Air Quality Snapshot</h2>
+      <p class="analytics-sub">Derived from <span id="snap-total">—</span> CPCB monitoring stations across India</p>
+    </div>
+
+    <div class="stat-cards">
+      <div class="stat-card">
+        <div class="stat-value" id="snap-stations">—</div>
+        <div class="stat-label">Monitoring Stations</div>
+        <div class="stat-note">across India</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="snap-cities">—</div>
+        <div class="stat-label">Cities Covered</div>
+        <div class="stat-note">unique localities</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="snap-avg-pm25" style="color:#ff6d00">—</div>
+        <div class="stat-label">Avg PM2.5</div>
+        <div class="stat-note">top active stations (µg/m³)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="snap-exceed" style="color:#dd2c00">—</div>
+        <div class="stat-label">Exceeding NAAQS</div>
+        <div class="stat-note">of active stations (PM2.5 &gt; 60)</div>
+      </div>
+    </div>
+
+    <!-- Charts row -->
+    <div class="analytics-grid">
+
+      <!-- City PM2.5 ranking -->
+      <div class="analytics-card">
+        <div class="analytics-card-header">
+          <h3>Current PM2.5 by Station</h3>
+          <span class="card-note">Click a bar to locate on map</span>
+        </div>
+        <div class="analytics-chart-wrap tall">
+          <canvas id="city-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Pollutant coverage -->
+      <div class="analytics-card">
+        <div class="analytics-card-header">
+          <h3>Pollutant Coverage</h3>
+          <span class="card-note">Stations measuring each pollutant</span>
+        </div>
+        <div class="analytics-chart-wrap">
+          <canvas id="coverage-chart"></canvas>
+        </div>
+        <div class="coverage-note">
+          Not all stations measure every pollutant. PM2.5 has the widest coverage nationally.
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Compare stations tool -->
+    <div class="analytics-card full-width">
+      <div class="analytics-card-header">
+        <h3>Compare Stations — 30-Day PM2.5 Trend</h3>
+        <span class="card-note">Select up to 3 stations to compare</span>
+      </div>
+
+      <div class="compare-controls">
+        <div class="compare-selects" id="compare-selects">
+          <select class="compare-select" data-slot="0"><option value="">— Select station —</option></select>
+          <select class="compare-select" data-slot="1"><option value="">— Select station —</option></select>
+          <select class="compare-select" data-slot="2"><option value="">— Select station —</option></select>
+        </div>
+        <button id="run-compare-btn" class="btn-primary">Compare</button>
+      </div>
+
+      <div class="analytics-chart-wrap compare-chart-wrap">
+        <canvas id="compare-chart"></canvas>
+        <div id="compare-empty" class="chart-empty">Select stations above and click Compare.</div>
+        <div id="compare-loading" class="chart-loading hidden">Fetching trend data…</div>
+      </div>
+    </div>
+
+    <!-- Data note -->
+    <div class="data-note">
+      <div class="data-note-inner">
+        <div class="data-note-col">
+          <h4>About the Data</h4>
+          <p>All readings are sourced from the <strong>Central Pollution Control Board (CPCB)</strong> via the OpenAQ platform. CPCB operates India's Continuous Ambient Air Quality Monitoring System (CAAQMS) — a network of real-time sensors installed across cities and industrial zones.</p>
+        </div>
+        <div class="data-note-col">
+          <h4>What the Limits Mean</h4>
+          <p>India's <strong>National Ambient Air Quality Standards (NAAQS)</strong> set the 24-hour PM2.5 limit at 60 µg/m³. The WHO recommends 15 µg/m³. Most Indian cities routinely exceed both — making this data directly relevant to public health, ESG reporting, and regulatory compliance.</p>
+        </div>
+        <div class="data-note-col">
+          <h4>Relevance to ESG</h4>
+          <p>Under SEBI's <strong>BRSR framework</strong>, India's top 1,000 listed companies must disclose environmental impact data. CPCB monitoring data provides the baseline against which corporate emissions, site selection, and climate risk are benchmarked by sustainability consultants.</p>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ── AI CHAT WIDGET ──────────────────────────────────────────── -->
+  <div id="cw">
+
+    <!-- Bubble -->
+    <button id="cwBubble" class="cw__bubble" aria-label="Open air quality assistant" aria-expanded="false">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      </svg>
+      <span class="cw__bubble-label">Ask AI</span>
+    </button>
+
+    <!-- Panel -->
+    <div id="cwPanel" class="cw__panel" aria-hidden="true">
+
+      <!-- Header -->
+      <div class="cw__header">
+        <div class="cw__header-info">
+          <span class="cw__header-dot"></span>
+          <div>
+            <div class="cw__header-title">Air Quality Assistant</div>
+            <div class="cw__header-sub">Powered by Claude</div>
+          </div>
+        </div>
+        <button id="cwClose" class="cw__close" aria-label="Close chat">✕</button>
+      </div>
+
+      <!-- Messages -->
+      <div id="cwMessages" class="cw__messages">
+        <div class="cw__msg cw__msg--ai">
+          <p>Ask me anything about India's air quality — what pollutants mean, how to read the map, NAAQS limits, or why certain cities are consistently worse than others.</p>
+        </div>
+        <!-- Suggestion chips -->
+        <div class="cw__chips">
+          <button class="cw__chip">What does PM2.5 mean for health?</button>
+          <button class="cw__chip">Why is Delhi's air quality so bad?</button>
+          <button class="cw__chip">How does this relate to BRSR reporting?</button>
+          <button class="cw__chip">What is NAAQS?</button>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div class="cw__footer">
+        <input id="cwInput" class="cw__input" type="text" placeholder="Ask about air quality, pollutants, cities…" autocomplete="off" />
+        <button id="cwSend" class="cw__send" aria-label="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>

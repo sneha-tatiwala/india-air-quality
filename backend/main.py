@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List
 
@@ -18,6 +19,27 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Serve frontend files — makes https://india-air-quality.onrender.com/ work
+# ---------------------------------------------------------------------------
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+@app.get("/app.js", include_in_schema=False)
+def serve_app_js():
+    return FileResponse(str(FRONTEND_DIR / "app.js"), media_type="application/javascript")
+
+@app.get("/style.css", include_in_schema=False)
+def serve_style():
+    return FileResponse(str(FRONTEND_DIR / "style.css"), media_type="text/css")
+
+@app.get("/chat.js", include_in_schema=False)
+def serve_chat_js():
+    return FileResponse(str(FRONTEND_DIR / "chat.js"), media_type="application/javascript")
 
 # ---------------------------------------------------------------------------
 # Load stations from saved JSON (coordinates from CPCB via OpenAQ snapshot)

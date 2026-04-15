@@ -115,9 +115,16 @@ async function loadTopPolluted() {
   const listEl = document.getElementById("top-polluted-list");
   listEl.innerHTML = '<div class="loading-msg">Loading…</div>';
 
-  const res  = await fetch(`${API}/top-polluted?pollutant=${currentPollutant}&limit=15`);
-  const data = await res.json();
-  topPollutedData = data.ranked;
+  let data;
+  try {
+    const res = await fetch(`${API}/top-polluted?pollutant=${currentPollutant}&limit=15`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+  } catch (err) {
+    listEl.innerHTML = `<div class="loading-msg">Could not load data (${err.message})</div>`;
+    return;
+  }
+  topPollutedData = data.ranked || [];
 
   // Color active stations on map
   for (const item of topPollutedData) {

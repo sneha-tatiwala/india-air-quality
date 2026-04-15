@@ -460,13 +460,12 @@ function renderReadings(readings) {
 }
 
 async function renderTrend(stationId) {
-  const days = document.getElementById("trend-days").value;
   document.getElementById("chart-loading").classList.remove("hidden");
   document.getElementById("chart-empty").classList.add("hidden");
-  document.getElementById("chart-title").textContent = `${currentPollutant.toUpperCase()} — ${days}-day trend`;
+  document.getElementById("chart-title").textContent = `${currentPollutant.toUpperCase()} — 7-day forecast`;
 
   try {
-    const res  = await fetch(`${API}/stations/${stationId}/trend?pollutant=${currentPollutant}&days=${days}`);
+    const res  = await fetch(`${API}/stations/${stationId}/trend?pollutant=${currentPollutant}`);
     const data = await res.json();
     document.getElementById("chart-loading").classList.add("hidden");
 
@@ -538,11 +537,6 @@ document.getElementById("pollutant-select").addEventListener("change", async fun
   currentPollutant = this.value;
   Object.values(markerMap).forEach(m => m.setStyle({ ...DEFAULT_STYLE }));
   await loadTopPolluted();
-  if (activeStationId) await renderTrend(activeStationId);
-});
-
-// ── Trend days change ─────────────────────────────────────────────────
-document.getElementById("trend-days").addEventListener("change", async function () {
   if (activeStationId) await renderTrend(activeStationId);
 });
 

@@ -32,7 +32,7 @@
       <button id="toggle-panel-btn" class="btn-secondary">Top Polluted</button>
     </div>
     <div class="nav-source">
-      Source: CPCB via OpenAQ &nbsp;|&nbsp; Live data
+      Source: CPCB via WAQI &nbsp;|&nbsp; Live data
       <span id="last-updated" class="last-updated"></span>
     </div>
   </nav>
@@ -74,12 +74,7 @@
 
         <div class="chart-section">
           <div class="chart-header">
-            <span id="chart-title" class="chart-title">PM2.5 — 30-day trend</span>
-            <select id="trend-days" class="trend-days-select">
-              <option value="14">14 days</option>
-              <option value="30" selected>30 days</option>
-              <option value="90">90 days</option>
-            </select>
+            <span id="chart-title" class="chart-title">PM2.5 — 7-day forecast</span>
           </div>
           <div class="chart-wrap">
             <canvas id="trend-chart"></canvas>
@@ -177,7 +172,7 @@
     <!-- Compare stations tool -->
     <div class="analytics-card full-width">
       <div class="analytics-card-header">
-        <h3>Compare Stations — 30-Day PM2.5 Trend</h3>
+        <h3>Compare Stations — PM2.5 Forecast</h3>
         <span class="card-note">Select up to 3 stations to compare</span>
       </div>
 
@@ -202,7 +197,7 @@
       <div class="data-note-inner">
         <div class="data-note-col">
           <h4>About the Data</h4>
-          <p>All readings are sourced from the <strong>Central Pollution Control Board (CPCB)</strong> via the OpenAQ platform. CPCB operates India's Continuous Ambient Air Quality Monitoring System (CAAQMS) — a network of real-time sensors installed across cities and industrial zones.</p>
+          <p>All readings are sourced from the <strong>Central Pollution Control Board (CPCB)</strong> via the World Air Quality Index (WAQI). CPCB operates India's Continuous Ambient Air Quality Monitoring System (CAAQMS) — a network of real-time sensors installed across cities and industrial zones.</p>
         </div>
         <div class="data-note-col">
           <h4>What the Limits Mean</h4>

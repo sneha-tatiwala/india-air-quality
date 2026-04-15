@@ -1,40 +1,34 @@
 import requests
 import time
 import os
-from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
 
-API_KEY  = os.getenv("OPENAQ_API_KEY")
-BASE_URL = "https://api.openaq.org/v3"
-HEADERS  = {"X-API-Key": API_KEY}
+API_KEY  = os.getenv("WAQI_API_KEY")
+BASE_URL = "https://api.waqi.info"
 
 
-def _get(endpoint, params={}, _retries=1):
-    url = f"{BASE_URL}{endpoint}"
-    response = requests.get(url, headers=HEADERS, params=params, timeout=10)
-    if response.status_code == 429:
+def _get(path, params=None, _retries=1):
+    all_params = {"token": API_KEY, **(params or {})}
+    resp = requests.get(f"{BASE_URL}{path}", params=all_params, timeout=15)
+    if resp.status_code == 429:
         if _retries > 0:
             time.sleep(5)
-            return _get(endpoint, params, _retries=_retries - 1)
-        raise Exception("OpenAQ rate limit reached. Try again in a few minutes.")
-    response.raise_for_status()
-    return response.json()
+            return _get(path, params, _retries - 1)
+        raise Exception("WAQI rate limit reached. Try again later.")
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("status") != "ok":
+        raise Exception(f"WAQI error: {data.get('data', 'unknown error')}")
+    return data
 
 
-def get_location_sensors(location_id: int):
-    """Returns all sensors at a location, including latest reading."""
-    return _get(f"/locations/{location_id}/sensors")
+def get_india_stations():
+    """All monitoring stations within India's geographic bounds."""
+    return _get("/map/bounds/", {"latlng": "8,68,37,97"})
 
 
-def get_sensor_daily(sensor_id: int, days_back: int = 30):
-    """Returns daily aggregated measurements for a sensor."""
-    now       = datetime.now(timezone.utc)
-    date_to   = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    date_from = (now - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return _get(f"/sensors/{sensor_id}/measurements/daily", params={
-        "datetime_from": date_from,
-        "datetime_to":   date_to,
-        "limit":         days_back + 5,
-    })
+def get_station_feed(uid: int):
+    """Current readings + 7-day forecast for one station by WAQI UID."""
+    return _get(f"/feed/@{uid}/")

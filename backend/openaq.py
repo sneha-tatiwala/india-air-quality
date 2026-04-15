@@ -16,7 +16,7 @@ def _get(path, params=None, _retries=1):
         if _retries > 0:
             time.sleep(5)
             return _get(path, params, _retries - 1)
-        raise Exception("WAQI rate limit reached. Try again later.")
+        raise Exception("WAQI rate limit reached.")
     resp.raise_for_status()
     data = resp.json()
     if data.get("status") != "ok":
@@ -24,11 +24,6 @@ def _get(path, params=None, _retries=1):
     return data
 
 
-def get_india_stations():
-    """All monitoring stations within India's geographic bounds."""
-    return _get("/map/bounds/", {"latlng": "8,68,37,97"})
-
-
-def get_station_feed(uid: int):
-    """Current readings + 7-day forecast for one station by WAQI UID."""
-    return _get(f"/feed/@{uid}/")
+def get_feed_by_geo(lat: float, lng: float):
+    """Nearest station data by coordinates — works on free token."""
+    return _get(f"/feed/geo:{lat};{lng}/")

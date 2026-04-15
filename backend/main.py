@@ -1,6 +1,5 @@
 import json
 import os
-import time
 import httpx
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -21,15 +20,14 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Station cache — load from WAQI on startup, persist to file for fast restarts
+# Load stations from saved JSON (coordinates from CPCB via OpenAQ snapshot)
+# Live readings are fetched from WAQI by geo-lookup at request time.
 # ---------------------------------------------------------------------------
-STATIONS_FILE = Path(__file__).parent.parent / "waqi_stations.json"
-POLLUTANTS    = {"pm25", "pm10", "no2", "so2", "co", "o3"}
+LOCATIONS_FILE = Path(__file__).parent.parent / "india_locations.json"
+POLLUTANTS     = {"pm25", "pm10", "no2", "so2", "co", "o3"}
 
 
 def _parse_city(name: str) -> str:
-    """Best-effort city extraction from WAQI station names."""
-    # WAQI names: "Anand Vihar, Delhi" / "Sirifort, Delhi - CPCB" / "IGI Airport"
     if " - " in name:
         name = name.rsplit(" - ", 1)[0]
     if "," in name:
@@ -38,56 +36,29 @@ def _parse_city(name: str) -> str:
 
 
 def _load_stations():
-    # Use cached file if it's less than 6 hours old
-    if STATIONS_FILE.exists():
-        age = time.time() - STATIONS_FILE.stat().st_mtime
-        if age < 21600:
-            with open(STATIONS_FILE) as f:
-                return json.load(f)
-
-    # Fetch fresh from WAQI
-    try:
-        data = openaq.get_india_stations()
-    except Exception as e:
-        # Fall back to stale file rather than crash
-        if STATIONS_FILE.exists():
-            with open(STATIONS_FILE) as f:
-                return json.load(f)
-        raise RuntimeError(f"Could not load stations from WAQI: {e}")
+    with open(LOCATIONS_FILE) as f:
+        raw = json.load(f)
 
     stations = []
-    for s in data.get("data", []):
-        uid = s.get("uid")
-        lat = s.get("lat")
-        lng = s.get("lng")
-        name = (s.get("station") or {}).get("name", "")
-        aqi_raw = s.get("aqi", "-")
-
-        if not (uid and lat and lng and name):
+    for loc in raw.get("results", []):
+        coords = loc.get("coordinates") or {}
+        lat    = coords.get("latitude")
+        lng    = coords.get("longitude")
+        if lat is None or lng is None:
             continue
 
-        try:
-            aqi = int(aqi_raw) if str(aqi_raw) not in ("-", "", "null") else None
-        except (ValueError, TypeError):
-            aqi = None
+        sensors    = loc.get("sensors", [])
+        pollutants = sorted({s["parameter"]["name"] for s in sensors})
 
         stations.append({
-            "id":         uid,
-            "name":       name,
-            "city":       _parse_city(name),
-            "provider":   "WAQI/CPCB",
+            "id":         loc["id"],
+            "name":       loc["name"],
+            "city":       _parse_city(loc["name"]),
+            "provider":   (loc.get("provider") or {}).get("name", "CPCB"),
             "lat":        lat,
             "lng":        lng,
-            "pollutants": ["pm25"],   # updated after first feed fetch; default covers most stations
-            "aqi":        aqi,
+            "pollutants": pollutants,
         })
-
-    # Persist to file
-    try:
-        with open(STATIONS_FILE, "w") as f:
-            json.dump(stations, f)
-    except Exception:
-        pass
 
     return stations
 
@@ -97,29 +68,26 @@ STATION_INDEX = {s["id"]: s for s in STATIONS}
 
 
 # ---------------------------------------------------------------------------
-# Helper: fetch latest readings for one station (cached 1 hour)
+# Helper: fetch live readings for one station via WAQI geo-lookup (1-hr cache)
 # ---------------------------------------------------------------------------
 def _get_latest(station_id: int):
     cached = cache.get(f"latest:{station_id}")
     if cached is not None:
         return cached
 
+    station = STATION_INDEX.get(station_id)
+    if not station:
+        return {}
+
     try:
-        data = openaq.get_station_feed(station_id)
+        data = openaq.get_feed_by_geo(station["lat"], station["lng"])
         feed = data.get("data", {})
     except Exception:
         return {}
 
     iaqi     = feed.get("iaqi", {})
-    time_obj = feed.get("time", {})
+    time_obj = feed.get("time") or {}
     ts       = time_obj.get("iso") or time_obj.get("s")
-
-    # Update station's pollutants list in memory from live feed
-    station = STATION_INDEX.get(station_id)
-    if station:
-        live_pollutants = sorted(k for k in iaqi if k in POLLUTANTS)
-        if live_pollutants:
-            station["pollutants"] = live_pollutants
 
     readings = {}
     for pollutant, info in iaqi.items():
@@ -146,7 +114,6 @@ def list_stations(
     pollutant: str = Query(None),
     search:    str = Query(None),
 ):
-    """All India monitoring stations with coordinates and pollutant list."""
     result = STATIONS
 
     if pollutant:
@@ -156,15 +123,11 @@ def list_stations(
         q = search.lower()
         result = [s for s in result if q in s["name"].lower() or q in s["city"].lower()]
 
-    return {
-        "total":    len(result),
-        "stations": [{k: v for k, v in s.items() if k != "aqi"} for s in result],
-    }
+    return {"total": len(result), "stations": result}
 
 
 @app.get("/api/stations/{station_id}/latest")
 def station_latest(station_id: int):
-    """Latest pollutant readings at a specific station."""
     station = STATION_INDEX.get(station_id)
     if not station:
         raise HTTPException(status_code=404, detail="Station not found")
@@ -186,7 +149,7 @@ def station_trend(
     pollutant:  str = Query("pm25"),
     days:       int = Query(7, ge=1, le=30),
 ):
-    """7-day PM2.5 forecast for one station (from WAQI forecast data)."""
+    """7-day PM2.5 forecast from WAQI for the station's location."""
     station = STATION_INDEX.get(station_id)
     if not station:
         raise HTTPException(status_code=404, detail="Station not found")
@@ -197,7 +160,7 @@ def station_trend(
         return cached
 
     try:
-        data = openaq.get_station_feed(station_id)
+        data = openaq.get_feed_by_geo(station["lat"], station["lng"])
         feed = data.get("data", {})
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -209,7 +172,6 @@ def station_trend(
         val = entry.get("avg")
         if day and val is not None:
             series.append({"date": day, "value": round(float(val), 2)})
-
     series.sort(key=lambda x: x["date"])
 
     result = {
@@ -230,29 +192,33 @@ def top_polluted(
     pollutant: str = Query("pm25"),
     limit:     int = Query(15, ge=1, le=30),
 ):
-    """Top N most polluted stations by PM2.5 (or selected pollutant)."""
-    # Use overall AQI (available without extra API calls) to pick candidates,
-    # then fetch live readings for the top 30 to get actual pollutant values.
-    candidates = sorted(
-        [s for s in STATIONS if s.get("aqi") is not None],
-        key=lambda s: s["aqi"],
-        reverse=True,
-    )[:30]
-
-    # Also include any already-cached stations that might be highly polluted
-    cached_high = [
-        s for s in STATIONS
-        if s not in candidates and cache.get(f"latest:{s['id']}")
+    """Top N most polluted stations by current readings."""
+    # Curated major-city station IDs (from india_locations.json)
+    MAJOR_STATIONS = [
+        8118, 5586, 5598, 6988, 10820,          # Delhi / NCR
+        3409323, 3409510, 3409511, 3409513,      # Mumbai
+        344103, 3409392,                          # Hyderabad, Vijayawada
+        3409385, 3409387,                         # Bengaluru
+        12046, 3409348,                           # Chennai, Madurai
+        3409320, 3409524,                         # Kolkata / Howrah
+        11610, 3409523,                           # Pune
+        227533, 228301,                           # Ahmedabad, Gandhinagar
+        3409430, 3409401,                         # Jaipur, Jodhpur
+        227386, 228397,                           # Lucknow, Varanasi
+        10914,                                    # Chandigarh
+        3409390,                                  # Guwahati
     ]
-    candidates = candidates + cached_high[:10]
 
-    def fetch_one(station):
-        readings = _get_latest(station["id"])
+    valid = [sid for sid in MAJOR_STATIONS if STATION_INDEX.get(sid)]
+
+    def fetch_one(sid):
+        readings = _get_latest(sid)
         reading  = readings.get(pollutant)
         if not reading:
             return None
+        station = STATION_INDEX[sid]
         return {
-            "station_id":   station["id"],
+            "station_id":   sid,
             "station_name": station["name"],
             "city":         station["city"],
             "lat":          station["lat"],
@@ -264,7 +230,7 @@ def top_polluted(
 
     results = []
     with ThreadPoolExecutor(max_workers=10) as pool:
-        futures = {pool.submit(fetch_one, s): s for s in candidates}
+        futures = {pool.submit(fetch_one, sid): sid for sid in valid}
         for future in as_completed(futures):
             item = future.result()
             if item:
@@ -280,14 +246,14 @@ def compare_stations(
     pollutant: str = Query("pm25"),
     days:      int = Query(7, ge=1, le=30),
 ):
-    """Compare forecast data for up to 5 stations."""
+    """Compare 7-day forecast for up to 5 stations."""
     try:
         station_ids = [int(x.strip()) for x in ids.split(",")]
     except ValueError:
         raise HTTPException(status_code=400, detail="ids must be comma-separated integers")
 
     if len(station_ids) > 5:
-        raise HTTPException(status_code=400, detail="Maximum 5 stations for comparison")
+        raise HTTPException(status_code=400, detail="Maximum 5 stations")
 
     out = []
     for sid in station_ids:
@@ -302,7 +268,7 @@ def compare_stations(
             continue
 
         try:
-            data = openaq.get_station_feed(sid)
+            data = openaq.get_feed_by_geo(station["lat"], station["lng"])
             feed = data.get("data", {})
         except Exception:
             continue
@@ -340,24 +306,29 @@ def health():
 
 @app.get("/api/debug/waqi")
 def debug_waqi():
-    """Test live WAQI API call for diagnosis."""
+    """Test live WAQI geo-lookup for diagnosis."""
     api_key = os.getenv("WAQI_API_KEY")
 
     result = {
-        "api_key_set":    bool(api_key),
-        "api_key_prefix": api_key[:8] + "..." if api_key else None,
+        "api_key_set":        bool(api_key),
+        "api_key_prefix":     api_key[:8] + "..." if api_key else None,
         "stations_in_memory": len(STATIONS),
-        "raw_response":  None,
-        "error":         None,
-        "readings":      None,
+        "raw_response":       None,
+        "readings":           None,
+        "error":              None,
     }
 
+    # Test with coordinates of Anand Vihar, Delhi
     try:
-        data = openaq.get_station_feed(7722)   # Delhi US Embassy — reliably active
+        data = openaq.get_feed_by_geo(28.6469, 77.3152)
         feed = data.get("data", {})
-        result["raw_response"] = feed
+        result["raw_response"] = {
+            "station_name": (feed.get("city") or {}).get("name"),
+            "aqi":          feed.get("aqi"),
+            "time":         (feed.get("time") or {}).get("iso"),
+        }
         result["readings"] = {
-            k: v for k, v in (feed.get("iaqi") or {}).items()
+            k: v.get("v") for k, v in (feed.get("iaqi") or {}).items()
             if k in POLLUTANTS
         }
     except Exception as e:
@@ -375,53 +346,35 @@ You are an air quality analyst assistant embedded in the India Air Quality Explo
 built on CPCB (Central Pollution Control Board) data via the World Air Quality Index (WAQI).
 
 WHAT THIS DASHBOARD SHOWS:
-- Real-time and forecast air quality data from monitoring stations across India
-- Pollutants: PM2.5, PM10, NO2, SO2, CO, O3 — all in µg/m³ (mass concentration)
-- Color-coded AQI map of India, current readings per station, 7-day PM2.5 forecast
-- Data sourced from CPCB's CAAQMS (Continuous Ambient Air Quality Monitoring System)
+- Real-time and forecast air quality data from 292 CPCB monitoring stations across India
+- Pollutants: PM2.5, PM10, NO2, SO2, CO, O3 — all in µg/m³
+- Color-coded AQI map, current readings per station, 7-day PM2.5 forecast
 
 INDIA AQI BANDS (PM2.5 µg/m³, CPCB standard):
-- 0–30: Good
-- 31–60: Satisfactory
-- 61–90: Moderate
-- 91–120: Poor
-- 121–250: Very Poor
-- 250+: Severe
+- 0–30: Good | 31–60: Satisfactory | 61–90: Moderate | 91–120: Poor | 121–250: Very Poor | 250+: Severe
 NAAQS 24-hr limits: PM2.5 = 60, PM10 = 100, NO2 = 80, SO2 = 80 (all µg/m³)
-WHO 24-hr guideline: PM2.5 = 15 µg/m³ (India's limit is 4x more permissive)
+WHO 24-hr guideline: PM2.5 = 15 µg/m³
 
-KEY POLLUTANTS — what they are and where they come from:
-- PM2.5: Fine particles under 2.5 microns. Primary health risk — penetrates lungs and bloodstream. Sources: vehicle exhaust, industrial emissions, crop burning.
-- PM10: Coarse particles under 10 microns. Sources: dust, construction, roads.
-- NO2: Nitrogen dioxide. Sources: vehicles, power plants. Causes respiratory illness.
-- SO2: Sulphur dioxide. Sources: coal combustion, industrial processes. Acid rain precursor.
-- CO: Carbon monoxide. Sources: incomplete combustion. Dangerous at high concentrations.
-- O3: Ground-level ozone. Formed by chemical reactions between NOx and VOCs in sunlight.
+KEY POLLUTANTS:
+- PM2.5: Fine particles, primary health risk. Sources: vehicles, industry, crop burning.
+- PM10: Coarse particles. Sources: dust, construction.
+- NO2: Nitrogen dioxide. Sources: vehicles, power plants.
+- SO2: Sulphur dioxide. Sources: coal, industrial processes.
+- CO: Carbon monoxide. Sources: incomplete combustion.
+- O3: Ground-level ozone. Formed from NOx + VOCs in sunlight.
 
 INDIA CONTEXT:
-- CPCB (Central Pollution Control Board) is under the Ministry of Environment, Forest and Climate Change (MoEFCC)
-- Delhi consistently ranks among the world's most polluted capitals
-- Major pollution drivers: vehicular emissions, thermal power plants, agricultural stubble burning (Oct–Nov), construction dust
-- Crop burning season (Oct–Nov) causes severe AQI spikes in North India
+- Delhi consistently among world's most polluted capitals.
+- Major drivers: vehicular emissions, thermal power plants, stubble burning (Oct–Nov), construction dust.
 
-ESG AND REGULATORY RELEVANCE:
-- SEBI's BRSR framework mandates India's top 1,000 listed companies to disclose environmental impact
-- CPCB data provides the baseline against which companies benchmark their environmental performance
-- Companies near high-pollution stations face higher climate risk and ESG scrutiny
-
-HOW TO USE THIS DASHBOARD:
-- Click any marker on the map to see live readings and 7-day PM2.5 forecast
-- Use the pollutant dropdown to switch between PM2.5, PM10, NO2, SO2, CO, O3
-- Search bar: type a city name to zoom to those stations
-- Scroll down for national analytics: city rankings, pollutant coverage, station comparison tool
+ESG RELEVANCE:
+- SEBI BRSR framework: India's top 1,000 listed companies must disclose environmental impact.
+- CPCB data is the benchmark for corporate ESG and climate risk assessment.
 
 YOUR BEHAVIOR:
-- Direct, no filler, no hedging.
-- Answer questions about air quality, pollutants, CPCB data, India AQI, NAAQS, ESG/BRSR.
-- Keep responses concise — 2 to 4 sentences unless the question needs more depth.
-- Do not invent specific numerical readings. If asked for real-time values, tell the user to check the map.
-- No markdown formatting. Plain sentences only.
-- No exclamation marks. No "Great question!" No "Happy to help!"
+- Direct, no filler. 2–4 sentences unless more is genuinely needed.
+- No markdown. No exclamation marks. No "Great question!"
+- Don't invent readings — tell users to check the map for live values.
 """.strip()
 
 

@@ -149,7 +149,7 @@ body {
   overflow: hidden;
 }
 
-#map { flex: 1; z-index: 1; }
+#map { flex: 1; z-index: 1; touch-action: none; }
 
 /* ── PANELS ─────────────────────────────────────────────────────── */
 .left-panel,
@@ -640,8 +640,8 @@ body {
 
   /* ── Map section ───────────────────────────────────────────────── */
   .map-section {
-    height: 52vh;
-    min-height: 300px;
+    height: 40vh;
+    min-height: 240px;
   }
 
   /* ── Panels → bottom sheets ────────────────────────────────────── */
@@ -674,9 +674,8 @@ body {
     flex-shrink: 0;
   }
 
-  /* Backdrop behind open panels */
+  /* Backdrop behind open panels — display controlled by JS only */
   .panel-backdrop {
-    display: block !important;
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,0.45);

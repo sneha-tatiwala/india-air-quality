@@ -1,5 +1,7 @@
 const API = "https://india-air-quality.onrender.com/api";
 
+function isMobile() { return window.innerWidth <= 768; }
+
 // ── AQI helpers ────────────────────────────────────────────────────
 const AQI_BANDS = [
   { max: 30,  color: "#00c853", label: "Good" },
@@ -33,10 +35,13 @@ Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', san
 const map = L.map("map", {
   center: [20.5, 78.9],
   zoom: 5,
-  zoomControl: false,        // add manually so we can place it on the left
+  zoomControl: false,
   zoomSnap: 0.25,
   zoomDelta: 0.5,
   wheelPxPerZoomLevel: 150,
+  preferCanvas: true,  // canvas rendering = reliable hit detection on mobile
+  tap: true,           // keep Leaflet's touch→click synthesis (needed for canvas markers)
+  tapTolerance: 15,    // allow slightly imprecise taps
 });
 
 L.control.zoom({ position: "topleft" }).addTo(map);
@@ -57,12 +62,31 @@ let currentPollutant = "pm25";
 let topPollutedData  = [];
 
 // ── Default marker style ─────────────────────────────────────────────
-const DEFAULT_STYLE = { radius: 5, fillColor: "#5c7cfa", color: "#7b96ff", weight: 1, fillOpacity: 0.65 };
-const ACTIVE_STYLE  = { radius: 7, fillColor: "#5c7cfa", color: "#ffffff", weight: 2.5, fillOpacity: 0.9 };
+const MOBILE_R      = isMobile();
+const DEFAULT_STYLE = { radius: MOBILE_R ? 8 : 5, fillColor: "#5c7cfa", color: "#7b96ff", weight: 1, fillOpacity: 0.65 };
+const ACTIVE_STYLE  = { radius: MOBILE_R ? 11 : 7, fillColor: "#5c7cfa", color: "#ffffff", weight: 2.5, fillOpacity: 0.9 };
+
+// ── Fetch with cold-start retry ───────────────────────────────────────
+async function fetchWithRetry(url, retries = 4, delayMs = 8000) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      const msg = attempt === 0
+        ? "Server is starting up — please wait…"
+        : `Still starting (attempt ${attempt + 1}/${retries})…`;
+      document.getElementById("last-updated").textContent = `· ${msg}`;
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+}
 
 // ── Load all stations ────────────────────────────────────────────────
 async function loadStations() {
-  const res  = await fetch(`${API}/stations`);
+  const res  = await fetchWithRetry(`${API}/stations`);
   const data = await res.json();
   allStations = data.stations;
 
@@ -80,10 +104,10 @@ async function loadStations() {
     marker.addTo(map);
   }
 
-  await loadTopPolluted();
   renderCoverageChart();
   populateCompareSelects();
   updateTimestamp();
+  loadTopPolluted(); // fire without await — map and bottom sections are already ready
 }
 
 // ── Top polluted ─────────────────────────────────────────────────────
@@ -100,7 +124,7 @@ async function loadTopPolluted() {
     const m = markerMap[item.station_id];
     if (!m) continue;
     const col = pollutantColor(currentPollutant, item.value);
-    m.setStyle({ fillColor: col, color: col, radius: 9, fillOpacity: 0.9, weight: 1.5 });
+    m.setStyle({ fillColor: col, color: col, radius: isMobile() ? 13 : 9, fillOpacity: 0.9, weight: 1.5 });
     m.bringToFront();
   }
 
@@ -268,11 +292,11 @@ function populateCompareSelects() {
   const selects = document.querySelectorAll(".compare-select");
   const presets = pm25Stations.filter(s =>
     s.name.toLowerCase().includes("new delhi") ||
-    s.name.toLowerCase().includes("hyderabad") ||
-    s.name.toLowerCase().includes("bengaluru")
+    s.name.toLowerCase().includes("mumbai") ||
+    s.name.toLowerCase().includes("kolkata")
   );
   presets.slice(0, 3).forEach((s, i) => {
-    if (selects[i]) selects[i].value = s.id;
+    if (selects[i]) selects[i].value = String(s.id);
   });
 }
 
@@ -323,6 +347,11 @@ document.getElementById("run-compare-btn").addEventListener("click", async () =>
     });
 
     if (compareChart) compareChart.destroy();
+
+    if (isMobile()) {
+      document.getElementById("compare-chart").closest(".analytics-card")
+        .scrollIntoView({ behavior: "smooth", block: "start" });
+    }
 
     const ctx = document.getElementById("compare-chart").getContext("2d");
     compareChart = new Chart(ctx, {
@@ -519,8 +548,6 @@ document.getElementById("trend-days").addEventListener("change", async function 
 
 // ── Panel helpers (backdrop on mobile) ────────────────────────────────
 const backdrop = document.getElementById("panel-backdrop");
-
-function isMobile() { return window.innerWidth <= 768; }
 
 function showBackdrop() { if (isMobile()) backdrop.style.display = "block"; }
 function hideBackdrop() { backdrop.style.display = "none"; }

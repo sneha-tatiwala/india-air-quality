@@ -1,6 +1,7 @@
 import json
 import os
 import httpx
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -94,8 +95,18 @@ def _get_latest(station_id: int):
         name   = param.get("name")
         units  = param.get("units")
         latest = s.get("latest") or {}
+
+        # Support both response shapes OpenAQ v3 has used:
+        # Shape A (current): latest = {"value": 45.5, "datetime": {"local": "..."}}
+        # Shape B (older):   latest = {"value": 45.5, "datetime": "2024-01-01T..."}
         value  = latest.get("value")
-        ts     = (latest.get("datetime") or {}).get("local")
+        dt_raw = latest.get("datetime")
+        if isinstance(dt_raw, dict):
+            ts = dt_raw.get("local")
+        elif isinstance(dt_raw, str):
+            ts = dt_raw
+        else:
+            ts = None
 
         # Only keep µg/m³ units to avoid duplicates (ppm versions)
         if value is not None and units == "µg/m³" and name not in readings:
@@ -182,7 +193,15 @@ def station_trend(
 
     series = []
     for r in data.get("results", []):
-        date  = (r.get("period") or {}).get("datetimeFrom", {}).get("local", "")[:10]
+        period = r.get("period") or {}
+        dt_from = period.get("datetimeFrom") or {}
+        # Support both dict {"local": "..."} and plain string
+        if isinstance(dt_from, dict):
+            date = dt_from.get("local", "")[:10]
+        elif isinstance(dt_from, str):
+            date = dt_from[:10]
+        else:
+            date = ""
         value = r.get("value")
         if date and value is not None:
             series.append({"date": date, "value": round(value, 2)})
@@ -210,37 +229,51 @@ def top_polluted(
     """Top N most polluted stations right now by a given pollutant.
     Uses a curated list of major city stations for speed.
     """
-    # Curated major-city station IDs covering all regions of India
+    # Curated major-city station IDs covering all regions of India (active stations)
     MAJOR_STATIONS = [
-        15, 16, 17, 50, 103, 235, 236, 431,   # Delhi / NCR
-        301, 346,                               # Haryana
-        354,                                    # Lucknow
-        378, 412, 594,                          # Chennai, Bengaluru
-        407,                                    # Hyderabad
-        286,                                    # Gaya (Bihar)
-        697,                                    # Haldia (West Bengal)
-        703,                                    # Jodhpur
-        12, 13,                                 # IIT Kanpur, DTU Delhi
+        8118, 5586, 5598, 6988, 10820,          # Delhi / NCR
+        3409323, 3409510, 3409511, 3409513,     # Mumbai
+        344103, 3409392,                         # Hyderabad, Vijayawada
+        3409385, 3409387,                        # Bengaluru
+        12046, 3409348,                          # Chennai, Madurai
+        3409320, 3409524,                        # Kolkata / Howrah
+        11610, 3409523,                          # Pune
+        227533, 228301,                          # Ahmedabad, Gandhinagar
+        3409430, 3409401,                        # Jaipur, Jodhpur
+        227386, 228397,                          # Lucknow, Varanasi
+        10914,                                   # Chandigarh
+        3409390,                                 # Guwahati
     ]
 
-    results = []
-    for sid in MAJOR_STATIONS:
-        station = STATION_INDEX.get(sid)
-        if not station or pollutant not in station["pollutants"]:
-            continue
+    valid = [
+        sid for sid in MAJOR_STATIONS
+        if STATION_INDEX.get(sid) and pollutant in STATION_INDEX[sid]["pollutants"]
+    ]
+
+    def fetch_one(sid):
         readings = _get_latest(sid)
         reading  = readings.get(pollutant)
-        if reading:
-            results.append({
-                "station_id":   sid,
-                "station_name": station["name"],
-                "city":         station["city"],
-                "lat":          station["lat"],
-                "lng":          station["lng"],
-                "value":        reading["value"],
-                "units":        reading["units"],
-                "timestamp":    reading["timestamp"],
-            })
+        if not reading:
+            return None
+        station = STATION_INDEX[sid]
+        return {
+            "station_id":   sid,
+            "station_name": station["name"],
+            "city":         station["city"],
+            "lat":          station["lat"],
+            "lng":          station["lng"],
+            "value":        reading["value"],
+            "units":        reading["units"],
+            "timestamp":    reading["timestamp"],
+        }
+
+    results = []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(fetch_one, sid): sid for sid in valid}
+        for future in as_completed(futures):
+            item = future.result()
+            if item:
+                results.append(item)
 
     results.sort(key=lambda x: x["value"], reverse=True)
     return {
@@ -286,7 +319,14 @@ def compare_stations(
 
         series = []
         for r in data.get("results", []):
-            date  = (r.get("period") or {}).get("datetimeFrom", {}).get("local", "")[:10]
+            period = r.get("period") or {}
+            dt_from = period.get("datetimeFrom") or {}
+            if isinstance(dt_from, dict):
+                date = dt_from.get("local", "")[:10]
+            elif isinstance(dt_from, str):
+                date = dt_from[:10]
+            else:
+                date = ""
             value = r.get("value")
             if date and value is not None:
                 series.append({"date": date, "value": round(value, 2)})
@@ -301,7 +341,8 @@ def compare_stations(
             "series":       series,
         }
         cache.set(cache_key, result, ttl_seconds=21600)
-        out.append(result)
+        if series:
+            out.append(result)
 
     return {"pollutant": pollutant, "days": days, "stations": out}
 
@@ -309,6 +350,46 @@ def compare_stations(
 @app.get("/api/health")
 def health():
     return {"status": "ok", "stations_loaded": len(STATIONS)}
+
+
+@app.get("/api/debug/openaq")
+def debug_openaq():
+    """Test live OpenAQ API call and return raw response for diagnosis."""
+    import os
+    api_key = os.getenv("OPENAQ_API_KEY")
+    test_station = 8118  # New Delhi — always present
+
+    result = {
+        "api_key_set": bool(api_key),
+        "api_key_prefix": api_key[:8] + "..." if api_key else None,
+        "test_station_id": test_station,
+        "raw_response": None,
+        "error": None,
+        "readings_parsed": None,
+    }
+
+    try:
+        data    = openaq.get_location_sensors(test_station)
+        sensors = data.get("results", [])
+        result["raw_response"] = data
+        result["sensor_count"] = len(sensors)
+
+        readings = {}
+        for s in sensors:
+            param  = s.get("parameter", {})
+            latest = s.get("latest") or {}
+            readings[param.get("name")] = {
+                "units":    param.get("units"),
+                "value":    latest.get("value"),
+                "datetime": (latest.get("datetime") or {}).get("local"),
+                "has_latest_key": "latest" in s,
+            }
+        result["readings_parsed"] = readings
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
 
 
 # ---------------------------------------------------------------------------

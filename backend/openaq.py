@@ -11,12 +11,14 @@ BASE_URL = "https://api.openaq.org/v3"
 HEADERS  = {"X-API-Key": API_KEY}
 
 
-def _get(endpoint, params={}):
+def _get(endpoint, params={}, _retries=1):
     url = f"{BASE_URL}{endpoint}"
     response = requests.get(url, headers=HEADERS, params=params, timeout=10)
     if response.status_code == 429:
-        time.sleep(60)
-        return _get(endpoint, params)
+        if _retries > 0:
+            time.sleep(5)
+            return _get(endpoint, params, _retries=_retries - 1)
+        raise Exception("OpenAQ rate limit reached. Try again in a few minutes.")
     response.raise_for_status()
     return response.json()
 
